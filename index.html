@@ -984,7 +984,7 @@ const INST_MAP = {
   'HUBTEL':null,
   'FID':'240100','FIDELITY':'240100',
   'ACCESS':'280100','ABG':'280100',
-  'FNBG':'330100','FNB':'330100',
+  'FNBG':'330100','FNB':'330100','FNBL':'330100','FIRST NATIONAL':'330100',
   'OMNI':'360100','OMNIBSIC':'360100',
   'GHL':'390100',
   'SG':'090100','SOCIETE GENERALE':'090100',
@@ -1188,7 +1188,8 @@ async function runGip(){
     const {idx, row, credit} = item;
     const bdate = normalizeDate(row['Transaction date']||row['Value date']||'');
 
-    // Find matching GIP report row
+    // Find all matching GIP report rows by date + amount
+    // Multiple rows = multiple payments from different people at same amount/date
     const gipMatch = gipRows.filter(g=>{
       const gamt = parseFloat(String(g['TRAN AMOUNT']||'0').replace(/,/g,''));
       const gdate = normalizeDate(g['TRAN DATE']||'');
@@ -1222,12 +1223,17 @@ async function runGip(){
           try{
             gLog(`Resolving incomplete name via Paystack: ${senderName} (${institution})...`);
             const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode)}`);
-            if(res.ok){
-              const data = await res.json();
-              const pName = data.resolved_name||data.account_name||'';
-              if(pName){ resolvedName=pName; paystackCalls++; fm=fuzzyMatch(pName, masterRows); }
-            }
-          }catch(e){ gLog(`Paystack error: ${e.message}`,'warn'); }
+            const rawText = await res.text();
+            let data = {};
+            try{ data = JSON.parse(rawText); }catch(pe){}
+            const pName = data.resolved_name || 
+                         data.account_name || 
+                         data.name ||
+                         (data.data && (data.data.account_name || data.data.name)) ||
+                         '';
+            if(pName){ resolvedName=pName; paystackCalls++; fm=fuzzyMatch(pName, masterRows); }
+            else{ gLog(`Paystack returned: ${rawText.substring(0,100)}`,'warn'); }
+          }catch(e){ gLog(`Paystack fetch error: ${e.message}`,'warn'); }
         }
       }
 
@@ -1246,20 +1252,33 @@ async function runGip(){
         // No master list match — always try Paystack with sender account + institution
         let paystackName = null;
         const bankCode2 = getInstCode(institution);
-        if(senderAcct && bankCode2){
-          try{
-            gLog(`Paystack lookup: ${senderAcct} (${institution} → ${bankCode2})...`);
-            const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode2)}`);
-            if(res.ok){
-              const data = await res.json();
-              paystackName = data.resolved_name||data.account_name||null;
-              if(paystackName) paystackCalls++;
-            }
-          }catch(e){ gLog(`Paystack error: ${e.message}`,'warn'); }
-        } else if(institution.toUpperCase()==='HUBTEL'){
+        if(institution.toUpperCase()==='HUBTEL'){
           gLog(`Hubtel is a payment aggregator — cannot resolve via Paystack`,'warn');
         } else if(!bankCode2 && institution){
           gLog(`Unknown institution code: ${institution} — please report to admin`,'warn');
+        } else if(senderAcct && bankCode2){
+          try{
+            gLog(`Paystack lookup: ${senderAcct} (${institution} → ${bankCode2})...`);
+            const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode2)}`);
+            const rawText = await res.text();
+            let data = {};
+            try{ data = JSON.parse(rawText); }catch(pe){}
+            
+            // Check all possible field names the API might return
+            paystackName = data.resolved_name || 
+                          data.account_name || 
+                          data.name ||
+                          (data.data && (data.data.account_name || data.data.name)) ||
+                          null;
+            
+            if(paystackName){
+              paystackCalls++;
+              gLog(`Paystack resolved: ${paystackName}`,'ok');
+            } else {
+              // Log the raw response so we can debug
+              gLog(`Paystack returned: ${rawText.substring(0,100)}`,'warn');
+            }
+          }catch(e){ gLog(`Paystack fetch error: ${e.message}`,'warn'); }
         }
 
         if(paystackName){
