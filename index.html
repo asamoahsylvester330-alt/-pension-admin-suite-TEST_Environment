@@ -1124,6 +1124,10 @@ async function runGip(){
   document.getElementById('g-log').innerHTML='';
   gPb(0);
 
+  // Cache Paystack results to avoid duplicate calls and beat rate limits
+  const paystackCache = {};
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
   gLog('Reading files...');
 
   // Read all sheets - skip header rows in GIP report
@@ -1221,18 +1225,24 @@ async function runGip(){
         const bankCode = getInstCode(institution);
         if(bankCode){
           try{
-            gLog(`Resolving incomplete name via Paystack: ${senderName} (${institution})...`);
-            const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode)}`);
-            const rawText = await res.text();
-            let data = {};
-            try{ data = JSON.parse(rawText); }catch(pe){}
-            const pName = data.resolved_name || 
-                         data.account_name || 
-                         data.name ||
-                         (data.data && (data.data.account_name || data.data.name)) ||
-                         '';
+            const cacheKey = senderAcct+'_'+bankCode;
+            let pName = '';
+            if(paystackCache[cacheKey] !== undefined){
+              pName = paystackCache[cacheKey];
+              if(pName) gLog(`Cache hit: ${pName} for ${senderAcct}`);
+            } else {
+              gLog(`Resolving incomplete name via Paystack: ${senderName} (${institution})...`);
+              await sleep(300); // avoid rate limit
+              const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode)}`);
+              const rawText = await res.text();
+              let data = {};
+              try{ data = JSON.parse(rawText); }catch(pe){}
+              pName = data.resolved_name || data.account_name || data.name ||
+                      (data.data && (data.data.account_name || data.data.name)) || '';
+              paystackCache[cacheKey] = pName;
+              if(!pName) gLog(`Paystack returned: ${rawText.substring(0,150)}`,'warn');
+            }
             if(pName){ resolvedName=pName; paystackCalls++; fm=fuzzyMatch(pName, masterRows); }
-            else{ gLog(`Paystack returned: ${rawText.substring(0,100)}`,'warn'); }
           }catch(e){ gLog(`Paystack fetch error: ${e.message}`,'warn'); }
         }
       }
@@ -1258,25 +1268,26 @@ async function runGip(){
           gLog(`Unknown institution code: ${institution} — please report to admin`,'warn');
         } else if(senderAcct && bankCode2){
           try{
-            gLog(`Paystack lookup: ${senderAcct} (${institution} → ${bankCode2})...`);
-            const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode2)}`);
-            const rawText = await res.text();
-            let data = {};
-            try{ data = JSON.parse(rawText); }catch(pe){}
-            
-            // Check all possible field names the API might return
-            paystackName = data.resolved_name || 
-                          data.account_name || 
-                          data.name ||
-                          (data.data && (data.data.account_name || data.data.name)) ||
-                          null;
-            
-            if(paystackName){
-              paystackCalls++;
-              gLog(`Paystack resolved: ${paystackName}`,'ok');
+            const cacheKey2 = senderAcct+'_'+bankCode2;
+            if(paystackCache[cacheKey2] !== undefined){
+              paystackName = paystackCache[cacheKey2] || null;
+              if(paystackName) gLog(`Cache hit: ${paystackName} for ${senderAcct}`);
             } else {
-              // Log the raw response so we can debug
-              gLog(`Paystack returned: ${rawText.substring(0,100)}`,'warn');
+              gLog(`Paystack lookup: ${senderAcct} (${institution} → ${bankCode2})...`);
+              await sleep(300); // avoid rate limit
+              const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode2)}`);
+              const rawText = await res.text();
+              let data = {};
+              try{ data = JSON.parse(rawText); }catch(pe){}
+              paystackName = data.resolved_name || data.account_name || data.name ||
+                            (data.data && (data.data.account_name || data.data.name)) || null;
+              paystackCache[cacheKey2] = paystackName || '';
+              if(paystackName){
+                paystackCalls++;
+                gLog(`Paystack resolved: ${paystackName}`,'ok');
+              } else {
+                gLog(`Paystack returned: ${rawText.substring(0,150)}`,'warn');
+              }
             }
           }catch(e){ gLog(`Paystack fetch error: ${e.message}`,'warn'); }
         }
