@@ -1209,16 +1209,16 @@ async function runGip(){
       let resolvedName = senderName;
       let fm = fuzzyMatch(senderName, masterRows);
 
-      // If no match or name looks incomplete, try Paystack
+      // If name looks incomplete, try Paystack first to get full name
       const nameIncomplete = senderName.endsWith('-') || 
                               senderName.split(' ').length < 2 ||
                               senderName.length < 4;
 
-      if((fm.status==='nomatch' || nameIncomplete) && senderAcct && institution){
+      if(nameIncomplete && senderAcct && institution){
         const bankCode = getInstCode(institution);
         if(bankCode){
           try{
-            gLog(`Resolving via Paystack: ${senderName} (${institution})...`);
+            gLog(`Resolving incomplete name via Paystack: ${senderName} (${institution})...`);
             const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode)}`);
             if(res.ok){
               const data = await res.json();
@@ -1241,9 +1241,60 @@ async function runGip(){
         statementOut[idx]['_MEMBER_NAME']=resolvedName+'?';
         gLog(`? ${resolvedName} — ambiguous match`,'warn');
       } else {
-        noMatch.push({...row,'Sender Name':resolvedName,'Amount':credit,'Reference':ref});
-        statementOut[idx]['_STATUS']='UNIDENTIFIED';
-        gLog(`✗ ${resolvedName} — no match found`,'err');
+        // No master list match — try Paystack with sender account + institution
+        let paystackName = null;
+        if(senderAcct && institution){
+          const bankCode = getInstCode(institution);
+          if(bankCode){
+            try{
+              gLog(`Resolving unmatched via Paystack: ${senderAcct} (${institution})...`);
+              const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode)}`);
+              if(res.ok){
+                const data = await res.json();
+                paystackName = data.resolved_name||data.account_name||null;
+                paystackCalls++;
+              }
+            }catch(e){ gLog(`Paystack error: ${e.message}`,'warn'); }
+          }
+        }
+
+        if(paystackName){
+          // Try master list match with Paystack name first
+          const fm2 = fuzzyMatch(paystackName, masterRows);
+          if(fm2.status==='matched'||fm2.status==='review'){
+            const member = fm2.member;
+            allocation.push(buildScheduleRow(member, credit));
+            statementOut[idx]['_STATUS']='IDENTIFIED';
+            statementOut[idx]['_MEMBER_NAME']=member['Full Name']||paystackName;
+            gLog(`✓ ${paystackName} → ${member['Full Name']} (${fm2.score}%) [Paystack+Master]`,'ok');
+          } else {
+            // Still no master match — create schedule from Paystack name directly
+            const parts = paystackName.trim().split(/\s+/);
+            const schedRow = {
+              'FIRST NAME': parts[0]||'',
+              'SURNAME': parts[1]||'',
+              'OTHER NAME': parts.slice(2).join(' ')||'',
+              'STAFF NUMBER': '',
+              'SALARY': '',
+              'PRE-TAX EMPLOYEE AMOUNT': '',
+              'PRE-TAX EMPLOYER AMOUNT': '',
+              'POST-TAX EMPLOYEE AMOUNT': credit,
+              'POST-TAX EMPLOYER AMOUNT': '',
+              'SSNIT NUMBER': '',
+              'GHANA NUMBER': '',
+              'NOTE': 'Paystack Resolved — Not in Master List'
+            };
+            allocation.push(schedRow);
+            statementOut[idx]['_STATUS']='IDENTIFIED';
+            statementOut[idx]['_MEMBER_NAME']=paystackName+' (Paystack)';
+            gLog(`✓ ${paystackName} — schedule created from Paystack [not in master]`,'ok');
+          }
+        } else {
+          // Truly unmatched — no Paystack result
+          noMatch.push({...row,'Sender Name':resolvedName,'Amount':credit,'Reference':ref});
+          statementOut[idx]['_STATUS']='UNIDENTIFIED';
+          gLog(`✗ ${resolvedName} — no match, no Paystack result`,'err');
+        }
       }
     }
   }
