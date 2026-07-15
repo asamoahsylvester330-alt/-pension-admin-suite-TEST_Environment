@@ -979,7 +979,9 @@ const INST_MAP = {
   'ADB':'080100',
   'PRB':'180100','PRUDENTIAL':'180100',
   'GTB':'230100','GTG':'230100',
-  'FBN':'200100',
+  'FBN':'200100','FBG':'200100','FIRSTBANK':'200100','FIRST BANK':'200100',
+  'FBL':'240100','FIDELITY':'240100',
+  'HUBTEL':null,
   'FID':'240100','FIDELITY':'240100',
   'ACCESS':'280100','ABG':'280100',
   'FNBG':'330100','FNB':'330100',
@@ -1241,21 +1243,23 @@ async function runGip(){
         statementOut[idx]['_MEMBER_NAME']=resolvedName+'?';
         gLog(`? ${resolvedName} — ambiguous match`,'warn');
       } else {
-        // No master list match — try Paystack with sender account + institution
+        // No master list match — always try Paystack with sender account + institution
         let paystackName = null;
-        if(senderAcct && institution){
-          const bankCode = getInstCode(institution);
-          if(bankCode){
-            try{
-              gLog(`Resolving unmatched via Paystack: ${senderAcct} (${institution})...`);
-              const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode)}`);
-              if(res.ok){
-                const data = await res.json();
-                paystackName = data.resolved_name||data.account_name||null;
-                paystackCalls++;
-              }
-            }catch(e){ gLog(`Paystack error: ${e.message}`,'warn'); }
-          }
+        const bankCode2 = getInstCode(institution);
+        if(senderAcct && bankCode2){
+          try{
+            gLog(`Paystack lookup: ${senderAcct} (${institution} → ${bankCode2})...`);
+            const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode2)}`);
+            if(res.ok){
+              const data = await res.json();
+              paystackName = data.resolved_name||data.account_name||null;
+              if(paystackName) paystackCalls++;
+            }
+          }catch(e){ gLog(`Paystack error: ${e.message}`,'warn'); }
+        } else if(institution.toUpperCase()==='HUBTEL'){
+          gLog(`Hubtel is a payment aggregator — cannot resolve via Paystack`,'warn');
+        } else if(!bankCode2 && institution){
+          gLog(`Unknown institution code: ${institution} — please report to admin`,'warn');
         }
 
         if(paystackName){
