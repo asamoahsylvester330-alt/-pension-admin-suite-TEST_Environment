@@ -1232,7 +1232,7 @@ async function runGip(){
               if(pName) gLog(`Cache hit: ${pName} for ${senderAcct}`);
             } else {
               gLog(`Resolving incomplete name via Paystack: ${senderName} (${institution})...`);
-              await sleep(300); // avoid rate limit
+              await sleep(700); // avoid rate limit
               const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode)}`);
               const rawText = await res.text();
               let data = {};
@@ -1274,7 +1274,7 @@ async function runGip(){
               if(paystackName) gLog(`Cache hit: ${paystackName} for ${senderAcct}`);
             } else {
               gLog(`Paystack lookup: ${senderAcct} (${institution} → ${bankCode2})...`);
-              await sleep(300); // avoid rate limit
+              await sleep(700); // avoid rate limit
               const res = await fetch(`${API}/resolve?account_number=${encodeURIComponent(senderAcct)}&bank_code=${encodeURIComponent(bankCode2)}`);
               const rawText = await res.text();
               let data = {};
