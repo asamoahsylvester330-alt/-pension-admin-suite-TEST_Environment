@@ -497,9 +497,9 @@ function parseAnyDate(v){
   return isNaN(d.getTime())?null:d;
 }
 function fmtDate(d){
-  const mm=String(d.getMonth()+1).padStart(2,'0');
-  const dd=String(d.getDate()).padStart(2,'0');
-  return `${dd}/${mm}/${d.getFullYear()}`;
+  const m=d.getMonth()+1;
+  const day=d.getDate();
+  return `${m}/${day}/${d.getFullYear()}`;
 }
 function sheetToObjects(wb,i){
   const ws=wb.Sheets[wb.SheetNames[i]];
@@ -542,7 +542,7 @@ function runReportProcess(){
   document.getElementById('r-log').innerHTML='';
   rPb(0);
 
-  const BAD_WORDS=['UNKNOWN','DUMMY','SUSPENSE','OVERPAYMENT','UNDERPAYMENT','MEMBER'];
+  const BAD_WORDS=['UNKNOWN','DUMMY','SUSPENSE','OVERPAYMENT','UNDERPAYMENT','MEMBER','OVERPA1230','WITHOUT SSNIT','HOLDING ACCOUNT'];
   const ghanaCardRegex=/^[A-Z0-9]{3}-[A-Z0-9]{9}-[A-Z0-9]{1}$/i;
 
   // Date columns to format as dd/mm/yyyy
@@ -667,6 +667,105 @@ function runReportProcess(){
     ['Fixed — DOB',dobFixed],['Fixed — Ghana Card',ghanaFixed],
     ['Final Rows',rows.length]
   ]),'Audit_Report');
+
+
+  // Reorder and rename columns to match required output format
+  const COLUMN_ORDER = [
+    'Surname',
+    'First_Name',
+    'Other_Names',
+    'Ghana_Card_Number',
+    'Social_Security_Number',
+    'Identification Type',
+    'Identification Number',
+    'Employee_Number',
+    'Date_Of_Birth',
+    'Employer_Name',
+    'Contributions_Allocation_Date',
+    'Contributions_Receipt_Date',
+    'Original_Date_Earned',
+    'Contribution Amount',
+    'Basic_Salary',
+    'Accumulated contributions at the end of last month',
+    'Accrued Benefits at the end of last month',
+    'Accumulated contributions at the end of current month',
+    'Accrued Benefits at the end of current month',
+  ];
+
+  // Map existing column names to required names
+  const COL_MAP = {
+    'Last_Name': 'Surname',
+    'First_Name': 'First_Name',
+    'Other_Name': 'Other_Names',
+    'Other Names': 'Other_Names',
+    'Ghana_Card_Number': 'Ghana_Card_Number',
+    'Social_Security_Number': 'Social_Security_Number',
+    'Employee_Number': 'Employee_Number',
+    'Date_Of_Birth': 'Date_Of_Birth',
+    'Employer_Name': 'Employer_Name',
+    'Contributions_Allocation_Date': 'Contributions_Allocation_Date',
+    'Contributions_Receipt_Date': 'Contributions_Receipt_Date',
+    'Original_Date_Earned': 'Original_Date_Earned',
+    'Contribution Amount': 'Contribution Amount',
+    'Basic_Salary': 'Basic_Salary',
+    'Accumulated contributions at the end of last month': 'Accumulated contributions at the end of last month',
+    'Accrued Benefits at the end of last month': 'Accrued Benefits at the end of last month',
+    'Accumulated contributions at the end of current month': 'Accumulated contributions at the end of current month',
+    'Accrued Benefits at the end of current month': 'Accrued Benefits at the end of current month',
+  };
+
+  // Remap rows to new column order
+  const orderedRows = rows.map(r => {
+    // First remap column names
+    const remapped = {};
+    for (const [oldKey, newKey] of Object.entries(COL_MAP)) {
+      if (r[oldKey] !== undefined) remapped[newKey] = r[oldKey];
+    }
+    // Build ordered row
+    const ordered = {};
+    for (const col of COLUMN_ORDER) {
+      ordered[col] = remapped[col] !== undefined ? remapped[col] : (r[col] !== undefined ? r[col] : '');
+    }
+    return ordered;
+  });
+
+  const cleanWS2 = XLSX.utils.json_to_sheet(orderedRows, {header: COLUMN_ORDER});
+  const wsRange2 = XLSX.utils.decode_range(cleanWS2['!ref'] || 'A1');
+
+  const DATE_COLS2 = ['Date_Of_Birth','Contributions_Allocation_Date','Contributions_Receipt_Date','Original_Date_Earned'];
+  const AMOUNT_COLS2 = ['Contribution Amount','Basic_Salary','Accumulated contributions at the end of last month','Accrued Benefits at the end of last month','Accumulated contributions at the end of current month','Accrued Benefits at the end of current month'];
+
+  for(let C=wsRange2.s.c;C<=wsRange2.e.c;C++){
+    const header = COLUMN_ORDER[C] || '';
+    const isDate = DATE_COLS2.includes(header);
+    const isAmt = AMOUNT_COLS2.includes(header);
+    // Header style
+    const hAddr = XLSX.utils.encode_cell({r:0,c:C});
+    if(cleanWS2[hAddr]) cleanWS2[hAddr].s={font:{bold:true},fill:{fgColor:{rgb:'D9E1F2'},patternType:'solid'},alignment:{horizontal:'center'}};
+    // Data rows
+    for(let R=1;R<=wsRange2.e.r;R++){
+      const addr = XLSX.utils.encode_cell({r:R,c:C});
+      if(!cleanWS2[addr]) continue;
+      if(isDate){
+        cleanWS2[addr].s={numFmt:'m/d/yyyy',alignment:{horizontal:'right'}};
+      } else if(isAmt){
+        const num = parseFloat(String(cleanWS2[addr].v||'').replace(/,/g,''));
+        if(!isNaN(num)){
+          cleanWS2[addr].t='n';cleanWS2[addr].v=num;
+          cleanWS2[addr].s={numFmt:'#,##0.00',alignment:{horizontal:'right'}};
+        }
+      }
+    }
+  }
+
+  // Replace the old clean sheet with the ordered one
+  outWB.SheetNames = outWB.SheetNames.filter(n=>n!=='Clean_Report');
+  delete outWB.Sheets['Clean_Report'];
+  XLSX.utils.book_append_sheet(outWB, cleanWS2, 'Clean_Report');
+  // Move Clean_Report to first position
+  const idx = outWB.SheetNames.indexOf('Clean_Report');
+  outWB.SheetNames.splice(idx,1);
+  outWB.SheetNames.unshift('Clean_Report');
 
   reportResult=XLSX.write(outWB,{bookType:'xlsx',type:'array',cellStyles:true});
   rPb(100);
