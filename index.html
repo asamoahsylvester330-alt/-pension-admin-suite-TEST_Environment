@@ -577,6 +577,12 @@ function runReportProcess(){
     if(!row['Last_Name']||row['Last_Name'].trim()==='') row['Last_Name']=String(row['Surname']||'').trim();
     if(!row['Other_Name']||row['Other_Name'].trim()==='') row['Other_Name']=String(row['Other Names']||'').trim();
   }
+  // Remove commas from all name columns
+  for(const row of rows){
+    row['First_Name']=String(row['First_Name']||'').replace(/,/g,'').trim();
+    row['Last_Name']=String(row['Last_Name']||'').replace(/,/g,'').trim();
+    row['Other_Name']=String(row['Other_Name']||'').replace(/,/g,'').trim();
+  }
   if(unmatched===0) rLog(`All ${matched.toLocaleString()} names matched`,'ok');
   else rLog(`Matched ${matched.toLocaleString()} — ${unmatched.toLocaleString()} unmatched, filled from original columns`,'warn');
   rPb(30);
@@ -595,6 +601,25 @@ function runReportProcess(){
     return !isNaN(a)&&!isNaN(b)&&a>0&&b>0;
   });
   rLog(`Removed ${(bb-rows.length).toLocaleString()} invalid benefit rows`);rPb(50);
+
+  // Remove rows where both Accumulated contributions AND Accrued Benefits are 0
+  // Also remove rows where either column is negative
+  const AC_COL='Accumulated contributions at the end of current month';
+  const AB_COL='Accrued Benefits at the end of current month';
+  const beforeZero=rows.length;
+  rows=rows.filter(r=>{
+    const acc=parseFloat(String(r[AC_COL]||'').replace(/,/g,''));
+    const ben=parseFloat(String(r[AB_COL]||'').replace(/,/g,''));
+    const accVal=isNaN(acc)?0:acc;
+    const benVal=isNaN(ben)?0:ben;
+    // Delete if both are zero
+    if(accVal===0&&benVal===0) return false;
+    // Delete if either is negative
+    if(accVal<0||benVal<0) return false;
+    return true;
+  });
+  const removedZero=beforeZero-rows.length;
+  if(removedZero>0) rLog(`Removed ${removedZero.toLocaleString()} rows with zero/negative benefit values`);
 
   rLog('Validating Ghana Card numbers…');
   let ghanaFixed=0;
@@ -747,7 +772,7 @@ function runReportProcess(){
       const addr = XLSX.utils.encode_cell({r:R,c:C});
       if(!cleanWS2[addr]) continue;
       if(isDate){
-        cleanWS2[addr].s={numFmt:'m/d/yyyy',alignment:{horizontal:'right'}};
+        cleanWS2[addr].s={numFmt:'m/d/yyyy',alignment:{horizontal:'right',wrapText:false}};
       } else if(isAmt){
         const num = parseFloat(String(cleanWS2[addr].v||'').replace(/,/g,''));
         if(!isNaN(num)){
