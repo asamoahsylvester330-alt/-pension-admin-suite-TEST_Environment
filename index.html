@@ -612,10 +612,12 @@ function runReportProcess(){
     const ben=parseFloat(String(r[AB_COL]||'').replace(/,/g,''));
     const accVal=isNaN(acc)?0:acc;
     const benVal=isNaN(ben)?0:ben;
-    // Delete if both are zero
-    if(accVal===0&&benVal===0) return false;
-    // Delete if either is negative
-    if(accVal<0||benVal<0) return false;
+    // Delete ONLY if BOTH accumulated contributions AND accrued benefits are zero
+    if(accVal===0 && benVal===0) return false;
+    // Delete if accumulated contributions is negative
+    if(accVal<0) return false;
+    // Delete if accrued benefits is negative
+    if(benVal<0) return false;
     return true;
   });
   const removedZero=beforeZero-rows.length;
