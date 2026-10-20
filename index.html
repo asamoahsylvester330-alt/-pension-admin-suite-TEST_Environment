@@ -780,6 +780,23 @@ function runReportProcess(){
         if(!isNaN(num)){
           cleanWS2[addr].t='n';cleanWS2[addr].v=num;
           cleanWS2[addr].s={numFmt:'#,##0.00',alignment:{horizontal:'right'}};
+      if (isDate) {
+  const cell = cleanWS2[addr];
+
+  // Convert text dates like "2026-10-20" or "10/20/2026" to an Excel date.
+  if (typeof cell.v === 'string') {
+    const d = new Date(cell.v);
+    if (!isNaN(d.getTime())) {
+      cell.v = d;
+      cell.t = 'd';
+    }
+  }
+
+  cell.s = {
+    numFmt: 'm/d/yyyy',
+    alignment: { horizontal: 'right', wrapText: false }
+  };
+}
         }
       }
     }
