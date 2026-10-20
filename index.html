@@ -670,16 +670,36 @@ function runReportProcess(){
       const addr=XLSX.utils.encode_cell({r:R,c:C});
       if(!cleanWS[addr]) continue;
       if(isDate){
-        cleanWS[addr].s={numFmt:'dd/mm/yyyy',alignment:{horizontal:'left'}};
-      } else if(isAmt){
-        const num=parseFloat(String(cleanWS[addr].v||'').replace(/,/g,''));
-        if(!isNaN(num)){
-          cleanWS[addr].t='n';
-          cleanWS[addr].v=num;
-          cleanWS[addr].s={numFmt:'#,##0.00',alignment:{horizontal:'right'}};
+        const cell = cleanWS2[addr];
+        if (cell && cell.v) {
+          // Parse MM/DD/YYYY or YYYY-MM-DD reliably
+          const parts = String(cell.v).trim().split(/[\/\-]/);
+          let d = null;
+          
+          if (parts.length === 3) {
+            if (parts[0].length === 4) {
+              d = new Date(parts[0], parts[1] - 1, parts[2]);
+            } else {
+              d = new Date(parts[2], parts[0] - 1, parts[1]);
+            }
+          } else {
+            d = new Date(cell.v);
+          }
+
+          if (d && !isNaN(d.getTime())) {
+            // Convert to Excel date serial number (accounting for Excel epoch & leap year bug)
+            const utcTime = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+            cell.v = (utcTime - Date.UTC(1899, 11, 30)) / (1000 * 60 * 60 * 24);
+            cell.t = 'n'; // Force numeric type so Excel handles it as a real date & right-aligns it
+          }
         }
+        
+        cleanWS2[addr].s = {
+          numFmt: 'm/d/yyyy',
+          alignment: { horizontal: 'right', wrapText: false }
+        };
       }
-    }
+        
     // Bold header row
     const hAddr=XLSX.utils.encode_cell({r:0,c:C});
     if(cleanWS[hAddr]) cleanWS[hAddr].s={font:{bold:true},fill:{fgColor:{rgb:'D9E1F2'},patternType:'solid'},alignment:{horizontal:'center'}};
