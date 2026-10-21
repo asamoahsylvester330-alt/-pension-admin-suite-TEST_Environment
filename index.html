@@ -608,12 +608,17 @@ function runReportProcess(){
   const AB_COL='Accrued Benefits at the end of current month';
   const beforeZero=rows.length;
   rows=rows.filter(r=>{
-    const acc=parseFloat(String(r[AC_COL]||'0').replace(/,/g,''));
-    const ben=parseFloat(String(r[AB_COL]||'0').replace(/,/g,''));
+    const acc=parseFloat(String(r[AC_COL]||'').replace(/,/g,''));
+    const ben=parseFloat(String(r[AB_COL]||'').replace(/,/g,''));
     const accVal=isNaN(acc)?0:acc;
     const benVal=isNaN(ben)?0:ben;
-    // Keep row only if AT LEAST ONE is greater than 0
-    return !(accVal<=0 && benVal<=0);
+    // Delete ONLY if BOTH accumulated contributions AND accrued benefits are zero
+    if(accVal===0 && benVal===0) return false;
+    // Delete if accumulated contributions is negative
+    if(accVal<0) return false;
+    // Delete if accrued benefits is negative
+    if(benVal<0) return false;
+    return true;
   });
   const removedZero=beforeZero-rows.length;
   if(removedZero>0) rLog(`Removed ${removedZero.toLocaleString()} rows with zero/negative benefit values`);
@@ -771,19 +776,19 @@ function runReportProcess(){
       if(isDate){
           const cell=cleanWS2[addr];
           if(cell&&cell.v){
-            // Parse the date string and reformat as M/D/YYYY string
             const parts=String(cell.v).trim().split(/[\/\-]/);
             let d=null;
             if(parts.length===3){
-              if(parts[0].length===4) d=new Date(parseInt(parts[0]),parseInt(parts[1])-1,parseInt(parts[2]));
-              else d=new Date(parseInt(parts[2]),parseInt(parts[0])-1,parseInt(parts[1]));
+              if(parts[0].length===4) d=new Date(parts[0],parts[1]-1,parts[2]);
+              else d=new Date(parts[2],parts[0]-1,parts[1]);
             } else d=new Date(cell.v);
             if(d&&!isNaN(d.getTime())){
-              cell.v=`${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`;
-              cell.t='s';
+              const utcTime=Date.UTC(d.getFullYear(),d.getMonth(),d.getDate());
+              cell.v=(utcTime-Date.UTC(1899,11,30))/(1000*60*60*24);
+              cell.t='n';
             }
           }
-          cleanWS2[addr].s={alignment:{horizontal:'right',wrapText:false}};
+          cleanWS2[addr].s={numFmt:'m/d/yyyy',alignment:{horizontal:'right',wrapText:false}};
         } else if(isAmt){
         const num = parseFloat(String(cleanWS2[addr].v||'').replace(/,/g,''));
         if(!isNaN(num)){
